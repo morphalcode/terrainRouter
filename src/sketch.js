@@ -14,6 +14,10 @@ let mountainTerrain;
 let snowTerrain;
 
 let zoomFactor = 100;
+let mapChanged = true;
+let xOffset = 10000;
+let yOffset = 10000;
+const cameraSpeed = 10;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -43,21 +47,43 @@ function setup() {
     color(255, 250, 250),
     color(255, 255, 255)
   );
-
-  describe("Canvas with a zoom factor of " + zoomFactor);
-  noLoop();
+  //noLoop();
 }
 
 function draw() {
+  if (!mapChanged) {
+    return;
+  }
   loadPixels();
-  for (x = 0; x < width; x++) {
-    for (y = 0; y < height; y++) {
-      const noiseValue = noise(x / zoomFactor, y / zoomFactor);
+
+  for (let x = 0; x < width; x++) {
+    for (let y = 0; y < height; y++) {
+      const xVal = (x - width / 2) / zoomFactor + xOffset;
+      const yVal = (y - height / 2) / zoomFactor + yOffset;
+      const noiseValue = noise(xVal, yVal);
+
       const terrainType = getTerrainType(noiseValue);
+
       set(x, y, getPixelColour(noiseValue, terrainType));
     }
   }
   updatePixels();
+  mapChanged = false;
+}
+
+// Pan
+function mouseDragged(event) {
+  xOffset -= event.movementX / zoomFactor;
+  yOffset -= event.movementY / zoomFactor;
+  mapChanged = true;
+}
+
+// Zoom
+function mouseWheel(event) {
+  zoomFactor -= event.delta / 10;
+  zoomFactor = Math.max(10, zoomFactor);
+  mapChanged = true;
+  return false;
 }
 
 function getPixelColour(noiseValue, terrainType) {
@@ -100,4 +126,5 @@ function normalise(value, max, min) {
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  mapChanged = true;
 }
