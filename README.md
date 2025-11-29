@@ -1,0 +1,1 @@
+BIT case assignment
