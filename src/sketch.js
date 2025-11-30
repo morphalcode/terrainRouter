@@ -70,7 +70,8 @@ let landTerrain;
 let mountainTerrain;
 let snowTerrain;
 
-let zoomFactor = 120;
+let zoomFactor = 100;
+let cellSize = 4;
 let heightFactor = 1000;
 let mapChanged = true;
 let xOffset = 10000;
@@ -117,38 +118,69 @@ function draw() {
   if (!mapChanged) {
     return;
   }
-  loadPixels();
-  let grid = [];
 
-  for (let x = 0; x < width; x++) {
+  background(0);
+  const cols = floor(width / cellSize);
+  const rows = floor(height / cellSize);
+  const grid = [];
+
+  for (let x = 0; x < cols; x++) {
     let column = [];
-    for (let y = 0; y < height; y++) {
-      // const xVal = (x - width / 2) / zoomFactor + xOffset;
-      // const yVal = (y - height / 2) / zoomFactor + yOffset;
-      const xVal = x / zoomFactor;
-      const yVal = y / zoomFactor;
+    for (let y = 0; y < rows; y++) {
+      // pixel position of this cell (center)
+      const px = x * cellSize + cellSize / 2;
+      const py = y * cellSize + cellSize / 2;
+
+      // sample noise in some coordinate space
+      const xVal = px / zoomFactor;
+      const yVal = py / zoomFactor;
+
       const noiseValue = noise(xVal, yVal);
 
-      currentNode = new Node(x, y, noiseValue);
+      // --- ISLAND MASK ---
+
+      // distance from center (in pixel space)
+      const dx = px - width / 2;
+      const dy = py - height / 2;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // max possible distance (corner)
+      const maxDistance = Math.sqrt(
+        (width / 2) * (width / 2) + (height / 2) * (height / 2)
+      );
+
+      // normalize to [0, 1]
+      let d = distance / maxDistance;
+      d = constrain(d, 0, 1);
+
+      // falloff: 1 at center -> 0 at edge
+      const power = 3; // try 2, 3, 4 etc
+      const falloff = 1 - Math.pow(d, power);
+
+      // final "height" in [0, 1], but pushed down near edges
+      const islandValue = noiseValue * falloff;
+
+      currentNode = new Node(x, y, islandValue);
       column.push(currentNode);
-      set(x, y, getPixelColour(noiseValue, currentNode.terrainType));
+      // set(x, y, getPixelColour(noiseValue, currentNode.terrainType));
+      const c = getPixelColour(islandValue, currentNode.terrainType);
+      fill(c);
+      noStroke();
+      rect(x * cellSize, y * cellSize, cellSize, cellSize);
     }
     grid.push(column);
   }
   nodeGrid = new NodeGrid(grid);
   if (pointA != null && pointB != null) {
-    drawPath(AStarSearch(pointA, pointB));
-    // pointA = null;
-    // pointB = null;
+    const path = AStarSearch(pointA, pointB);
+    if (path) {
+      drawPath(path);
+    }
   }
 
-  updatePixels();
-  if (pointA != null) {
-    text("A", pointA.x, pointA.y);
-  }
-  if (pointB != null) {
-    text("B", pointB.x, pointB.y);
-  }
+  if (pointA != null) drawMarker(pointA, "A");
+  if (pointB != null) drawMarker(pointB, "B");
+
   mapChanged = false;
 }
 
@@ -168,19 +200,39 @@ function draw() {
 // }
 
 function mouseClicked() {
+  const gx = floor(mouseX / cellSize);
+  const gy = floor(mouseY / cellSize);
+
   if (pointA != null && pointB == null) {
-    pointB = { x: mouseX, y: mouseY };
+    pointB = { x: gx, y: gy };
   } else {
-    pointA = { x: mouseX, y: mouseY };
+    pointA = { x: gx, y: gy };
     pointB = null;
   }
   mapChanged = true;
 }
 
 function drawPath(path) {
+  noStroke();
+  fill(255, 0, 0);
   for (const pos of path) {
-    set(pos.x, pos.y, color(255, 0, 0));
+    const px = pos.x * cellSize + cellSize / 2;
+    const py = pos.y * cellSize + cellSize / 2;
+    ellipse(px, py, cellSize * 0.6, cellSize * 0.6);
   }
+}
+
+function drawMarker(point, label) {
+  const px = point.x * cellSize + cellSize / 2;
+  const py = point.y * cellSize + cellSize / 2;
+
+  noStroke();
+  fill(255, 255, 0);
+  ellipse(px, py, cellSize, cellSize);
+
+  fill(0);
+  textAlign(CENTER, CENTER);
+  text(label, px, py);
 }
 
 function getPixelColour(noiseValue, terrainType) {
