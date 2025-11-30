@@ -48,6 +48,7 @@ class Node {
     this.h = Infinity;
     this.f = Infinity;
     this.parent = null;
+    this.portalPartner = null;
     this.inPath = false;
     this.terrainType = getTerrainType(noise);
   }
@@ -73,19 +74,34 @@ let snowTerrain;
 let zoomFactor = 100;
 let cellSize = 4;
 let heightFactor = 1000;
+let prevHeightFactor = heightFactor;
 let mapChanged = true;
-let xOffset = 10000;
-let yOffset = 10000;
-const cameraSpeed = 10;
+//let xOffset = 10000;
+//let yOffset = 10000;
+//const cameraSpeed = 10;
+let portalColour;
+let pathColour;
 
 let nodeGrid;
 let pointA = null;
 let pointB = null;
+let portalA = null;
+let portalB = null;
 let currentNode = null;
+let canvasElem;
+
+document.oncontextmenu = () => false;
 
 function setup() {
-  createCanvas(windowWidth, windowHeight);
+  canvasElem = createCanvas(windowWidth, windowHeight);
   noiseDetail(8, 0.5);
+
+  heightSlider = createSlider(100, 3000, heightFactor, 1);
+  heightSlider.position(10, 10);
+  heightSlider.style("width", "200px");
+
+  portalColour = color(150, 131, 236);
+  pathColour = color(255, 0, 0);
 
   waterTerrain = new TerrainType(
     0.2,
@@ -115,6 +131,13 @@ function setup() {
 }
 
 function draw() {
+  heightFactor = heightSlider.value();
+
+  // Trigger redraw if slider changed
+  if (heightFactor !== prevHeightFactor) {
+    mapChanged = true;
+    prevHeightFactor = heightFactor;
+  }
   if (!mapChanged) {
     return;
   }
@@ -171,18 +194,38 @@ function draw() {
     grid.push(column);
   }
   nodeGrid = new NodeGrid(grid);
+
+  if (portalA != null && portalB != null) {
+    const nodeA = nodeGrid.getNode(portalA.x, portalA.y);
+    const nodeB = nodeGrid.getNode(portalB.x, portalB.y);
+
+    nodeA.portalPartner = nodeB;
+    nodeB.portalPartner = nodeA;
+  }
+
   if (pointA != null && pointB != null) {
     const path = AStarSearch(pointA, pointB);
     if (path) {
       drawPath(path);
+    } else {
+      window.alert("Path not possible!");
     }
   }
 
   if (pointA != null) drawMarker(pointA, "A");
   if (pointB != null) drawMarker(pointB, "B");
 
+  if (portalA != null) drawPortal(portalA);
+  if (portalB != null) drawPortal(portalB);
+
   mapChanged = false;
 }
+
+function islandMask(xVal, yVal) {
+  // distance from center (in pixel space)
+}
+
+// Navigation (scrapped feature)
 
 // // Pan
 // function mouseDragged(event) {
@@ -199,10 +242,24 @@ function draw() {
 //   return false;
 // }
 
-function mouseClicked() {
+function mousePressed(event) {
+  if (event.target !== canvasElem.elt) return;
+
   const gx = floor(mouseX / cellSize);
   const gy = floor(mouseY / cellSize);
 
+  if (mouseButton === LEFT) {
+    handlePathClick(gx, gy);
+    return;
+  }
+
+  if (mouseButton === RIGHT) {
+    handlePortalClick(gx, gy);
+    return;
+  }
+}
+
+function handlePathClick(gx, gy) {
   if (pointA != null && pointB == null) {
     pointB = { x: gx, y: gy };
   } else {
@@ -212,9 +269,24 @@ function mouseClicked() {
   mapChanged = true;
 }
 
-function drawPath(path) {
+function handlePortalClick(gx, gy) {
+  if (portalA != null && portalB == null) {
+    portalB = { x: gx, y: gy };
+
+    const nodeA = nodeGrid.getNode(portalA.x, portalA.y);
+    const nodeB = nodeGrid.getNode(portalB.x, portalB.y);
+    nodeA.portalPartner = nodeB;
+    nodeB.portalPartner = nodeA;
+  } else {
+    portalA = { x: gx, y: gy };
+    portalB = null;
+  }
+  mapChanged = true;
+}
+
+function drawPath(path, colourChoice = pathColour) {
   noStroke();
-  fill(255, 0, 0);
+  fill(colourChoice);
   for (const pos of path) {
     const px = pos.x * cellSize + cellSize / 2;
     const py = pos.y * cellSize + cellSize / 2;
@@ -222,13 +294,26 @@ function drawPath(path) {
   }
 }
 
+function drawPortal(point, colourChoice = portalColour) {
+  const px = point.x * cellSize + cellSize / 2;
+  const py = point.y * cellSize + cellSize / 2;
+  //noStroke();
+  stroke(
+    colourChoice.levels[0] * 0.8,
+    colourChoice.levels[1] * 0.8,
+    colourChoice.levels[2] * 0.8
+  );
+  fill(colourChoice);
+  ellipse(px, py, cellSize * 1.2, cellSize * 2.4);
+}
+
 function drawMarker(point, label) {
   const px = point.x * cellSize + cellSize / 2;
   const py = point.y * cellSize + cellSize / 2;
 
-  noStroke();
-  fill(255, 255, 0);
-  ellipse(px, py, cellSize, cellSize);
+  // noStroke();
+  // fill(255, 255, 0);
+  // ellipse(px, py, cellSize, cellSize);
 
   fill(0);
   textAlign(CENTER, CENTER);
@@ -308,7 +393,6 @@ function reconstructPath(node) {
   const path = [];
   let current = node;
   while (current) {
-    //set(current.x, current.y, color(255, 0, 0));
     current.inPath = true;
     path.push({ x: current.x, y: current.y });
     current = current.parent;
@@ -375,7 +459,11 @@ function AStarSearch(start, end) {
 
       let potentialNeighbour = nodeGrid.getNode(nx, ny);
       // Not walkable?
-      if (potentialNeighbour.terrainType == waterTerrain) continue;
+      if (
+        potentialNeighbour.terrainType == waterTerrain ||
+        potentialNeighbour.terrainType == snowTerrain
+      )
+        continue;
 
       const neighborKey = nodeKey(nx, ny);
       if (closedSet.has(neighborKey)) continue;
@@ -401,6 +489,37 @@ function AStarSearch(start, end) {
         neighborNode.f = neighborNode.g + neighborNode.h;
         neighborNode.parent = current;
         // No need to reinsert into openSet, we just updated its scores
+      }
+    }
+
+    // --- PORTAL NEIGHBOR ---
+    if (current.portalPartner) {
+      const portalNode = current.portalPartner;
+      const nx = portalNode.x;
+      const ny = portalNode.y;
+
+      const neighborKey = nodeKey(nx, ny);
+      if (!closedSet.has(neighborKey)) {
+        // define the teleport cost (could be cheap, but > 0)
+        const teleportCost = 1; // or 0.5 or whatever you like
+
+        const tentativeG = current.g + teleportCost;
+        let neighborNode = openMap.get(neighborKey);
+
+        if (!neighborNode) {
+          neighborNode = portalNode;
+          neighborNode.g = tentativeG;
+          neighborNode.h = heuristic(nx, ny, end.x, end.y, allowDiagonal);
+          neighborNode.f = neighborNode.g + neighborNode.h;
+          neighborNode.parent = current;
+
+          openSet.push(neighborNode);
+          openMap.set(neighborKey, neighborNode);
+        } else if (tentativeG < neighborNode.g) {
+          neighborNode.g = tentativeG;
+          neighborNode.f = neighborNode.g + neighborNode.h;
+          neighborNode.parent = current;
+        }
       }
     }
   }
